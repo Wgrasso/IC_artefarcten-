@@ -93,12 +93,13 @@ def plot_artefacten(t, ABP, CVP, df_results):
 if __name__ == "__main__":
 
     from readArtefacts import read_Artefacts
+    from config import DATA_PATH, FS
 
     # --- Instellingen ---
-    path = r'C:\Users\Mila den Hollander\OneDrive - Delft University of Technology\Bureaublad\KT3405 Intensive care en computer simulatie\KT3401_AFdata_2025'
+    path = DATA_PATH
     folder = 'Calibratie'
     filename = 'D04Cal.xlsx'
-    fs = 100
+    fs = FS
 
     # 1. Inladen
     t, ABP, CVP = read_Artefacts(path, folder, filename, fs)

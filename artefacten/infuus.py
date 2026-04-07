@@ -34,10 +34,11 @@ def functie_CVD(t, ABP, CVP):
 
 
 # --- Instellingen voor de test ---
-path = r'C:\Users\HP\OneDrive - Delft University of Technology\KT3405\Artefactdetectie'
+from config import DATA_PATH, FS
+path = DATA_PATH
 folder = 'Infuus_op_CVD'
-filename = 'D04Inf-op-CVP.xlsx' # Pas aan naar een bestaand bestand in die map
-fs = 100
+filename = 'D04Inf-op-CVP.xlsx'
+fs = FS
 
 
 # 1. Data inladen

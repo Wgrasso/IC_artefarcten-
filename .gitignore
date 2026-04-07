@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Personal config (each team member has their own paths)
+config.py

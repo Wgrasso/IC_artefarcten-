@@ -63,10 +63,11 @@ def read_Artefacts(path, folder, filename, fs):
 if __name__ == "__main__":
 
 # Load data
-    path = [r"C:\Users\Mila den Hollander\OneDrive - Delft University of Technology\Bureaublad\KT3405 Intensive care en computer simulatie\KT3401_AFdata_2025"]
-    folder = ["Calibratie"]
-    filename = [r"D01Cal.xlsx"]
-    fs = 100
+    from config import DATA_PATH, FS
+    path = DATA_PATH
+    folder = "Calibratie"
+    filename = "D01Cal.xlsx"
+    fs = FS
 
     t, ABP, CVP = read_Artefacts(path, folder, filename, fs)
 

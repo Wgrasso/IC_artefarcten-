@@ -67,14 +67,15 @@ def read_Artefacts(path, folder, filename, fs):
 if __name__ == "__main__":
 
 # Load data
-    path = "C:\\Users\\Mila den Hollander\\OneDrive - Delft University of Technology\\Bureaublad\\KT3405 Intensive care en computer simulatie\\KT3401_AFdata_2025"
+    from config import DATA_PATH, FS, FILES
+    path = DATA_PATH
     folder = "Slinger"
-    filename = "D01Slinger.xlsx"
-    fs = 100
-    filenames= ["D01Slinger.xlsx", "D02Slinger.xlsx", "D03Slinger.xlsx", "D05Slinger.xlsx", "D06Slinger.xlsx"]
+    filename = FILES["Slinger"][0]
+    fs = FS
+    filenames = FILES["Slinger"]
 
 
-    t, ABP, CVP = read_Artefacts(path, folder, filename, fs) 
+    t, ABP, CVP = read_Artefacts(path, folder, filename, fs)
 
 # %%
     if t is not None and CVP is not None:

@@ -45,10 +45,11 @@ def functie_transducer(t, ABP, CVP):
 
 # --- Instellingen voor de test ---
 if __name__ == "__main__":
-    path = r'C:\Users\HP\OneDrive - Delft University of Technology\KT3405\Artefactdetectie'
-    folder = 'Transducer_hoog'  # De mapnaam uit je eerdere screenshot [cite: 52]
+    from config import DATA_PATH, FS
+    path = DATA_PATH
+    folder = 'Transducer_hoog'
     filename = 'D03Transd_hoog.xlsx'
-    fs = 100
+    fs = FS
 
 
     # 1. Data inladen
