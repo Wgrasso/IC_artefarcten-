@@ -1,94 +1,3 @@
-# %%
-
-import matplotlib.pyplot as plt
-'''
-Model with function to load artefact data from Excel .xls and .xlsx files and splits 
-data in separate vectors to process. Written for KT3401 - Assignment Artefact Detection
-'''
-# #%% Clear system
-# from IPython import get_ipython
-# # Clear all variables (IPython/Jupyter)
-# get_ipython().magic('reset -sf')
-# import matplotlib.pyplot as plt
-# # Close all figures
-# plt.close('all')
-# import os
-# # Clear the console
-# os.system('cls' if os.name == 'nt' else 'clear')
-
-#%% Import modules
-import pandas as pd
-import numpy as np 
-import os
-
-def read_Artefacts(path, folder, filename, fs):
-    """
-    Inputs: 
-    path: string to the path with data folders
-    folder: string with the name of the folder with the dataset
-    filename: string with name of the file, incl. extension
-    fs: sampling rate (in Hz)
-
-    Outputs: 
-    t: time vector based on length of signal (to use instead of Time)
-    ABP, CVP: vectors of arterial blood pressure and central venous pressure, with same length as t
-    """
-    filepath = os.path.join(path, folder, filename)
-    print(f"Attempting to read file at: {filepath}")  # Debug print statement
-    # Read the Excel file
-    try:
-        raw = pd.read_excel(filepath, sheet_name=0, header=None)
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-        return None, None, None
-    raw = pd.read_excel(filepath, sheet_name=0, header=None)
-    
-    # Skip the first two rows
-    raw = raw.iloc[2:, :]
-    
-    # Convert the data to a numpy array
-    data = raw.to_numpy()
-    
-    # Allocate imported array to column variable names
-    ABP = pd.to_numeric(data[:, 1], errors = 'coerce')
-    CVP = pd.to_numeric(data[:, 2], errors = 'coerce')
-    
-    # Create time vector
-    t = np.arange(1/fs, len(ABP)/fs + 1/fs, 1/fs)
-
-    return t, ABP, CVP
-
-
-
-
-
-
-# %%
-if __name__ == "__main__":
-
-# Load data
-    from config import DATA_PATH, FS, FILES
-    path = DATA_PATH
-    folder = "Gasbel"
-    filename = FILES["Gasbel"][0]
-    fs = FS
-    filenames = FILES["Gasbel"]
-
-
-    t, ABP, CVP = read_Artefacts(path, folder, filename, fs)
-
-# %%
-    if t is not None and CVP is not None:
-        plt.plot(t, CVP, label='CVP')
-        plt.plot(t, ABP, label='ABP')
-        plt.xlabel('Time (s)')
-        plt.ylabel('Pressure (mmHg)')
-        plt.legend()
-        plt.show()
-    else:
-        print("Unable to plot because the data could not be loaded.")
-
-# %%
 import numpy as np
 import pandas as pd
 from scipy.signal import spectrogram
@@ -150,7 +59,7 @@ def _voeg_segmenten_samen(start_tijden, eind_tijden, min_gap):
     return np.array(starts), np.array(einden)
 
 
-def _spectrogram_afwijking(signaal, fs, resolution, frange): 
+def _spectrogram_afwijking(signaal, fs, resolution, frange):
     """
     Bereken spectrogrammaat in gekozen frequentiegebied en interpoleer naar lengte van signaal.
     """
@@ -253,17 +162,16 @@ def functie_gasbel(t, ABP, CVP, fs=100):
 
     artefact_rows = []
 
-    # Alleen ABP gebruiken
     binair_ABP, start_ABP, eind_ABP, afwijkingen_ABP = _detect_gasbel_1_signaal(
         signaal=ABP,
         t=t,
         fs=fs,
         resolution=resolution,
         frange=frange,
-        threshold_factor=0.65,   # iets minder streng dan 0.55
+        threshold_factor=0.65,
         flush_offset=75,
-        flush_min_samples=20,    # 0.2 s
-        gasbel_min_samples=300,  # 3 s
+        flush_min_samples=20,
+        gasbel_min_samples=300,
         max_fraction=0.7,
         merge_gap=2.0
     )
@@ -271,7 +179,6 @@ def functie_gasbel(t, ABP, CVP, fs=100):
     for s, e in zip(start_ABP, eind_ABP):
         artefact_rows.append([round(float(s), 2), round(float(e), 2), "Gasbel", "ABP"])
 
-    # CVP expres leeg laten
     binair_CVP = np.zeros(len(t), dtype=bool)
     afwijkingen_CVP = np.zeros(len(t))
 
@@ -281,10 +188,3 @@ def functie_gasbel(t, ABP, CVP, fs=100):
     )
 
     return artefacten_uit, binair_ABP, binair_CVP, afwijkingen_ABP, afwijkingen_CVP
-
-# %%
-
-# %% [markdown]
-# 
-
-
