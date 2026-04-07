@@ -1,85 +1,28 @@
 # ============================================================
-#  CONFIG TEMPLATE
+#  CONFIG — Kopieer dit bestand naar config.py
+#           en vul jouw pad in bij DATA_PATH
 # ============================================================
 #
-#  HOE TE GEBRUIKEN / HOW TO USE
-#  ──────────────────────────────
-#
-#  Stap 1:  Kopieer dit bestand naar config.py
+#  Stap 1:  Kopieer dit bestand:
 #             cp config_example.py config.py
 #
-#  Stap 2:  Open config.py en vervang PASTE_YOUR_PATH_HERE
-#           met het pad naar JOUW data map.
+#  Stap 2:  Vervang het pad hieronder met jouw eigen pad.
 #
-#  Stap 3:  Klaar! config.py staat in .gitignore, dus jouw
-#           persoonlijke pad wordt nooit naar git gepusht.
-#
-# ============================================================
-#
-#  NIEUW BESTAND TOEVOEGEN
-#  ───────────────────────
-#
-#  Stel: je hebt een nieuw databestand "D07Flush.xlsx" in de
-#  map "Flush". Dan doe je het volgende:
-#
-#  Stap 1:  Open JOUW config.py (niet config_example.py!)
-#
-#  Stap 2:  Zoek de juiste map in het FILES woordenboek.
-#           Bijvoorbeeld voor Flush:
-#
-#             "Flush": [
-#                 "D01Flush.xlsx",
-#                 "D03Flush.xlsx",
-#                 ...
-#                 "D07Flush.xlsx",    # <-- voeg hier toe
-#             ],
-#
-#  Stap 3:  Sla op. Het programma pakt automatisch alle
-#           bestanden uit de lijst.
-#
-#  NIEUWE MAP TOEVOEGEN
-#  ────────────────────
-#
-#  Stap 1:  Voeg de mapnaam toe aan FOLDERS:
-#
-#             FOLDERS = {
-#                 ...
-#                 "NieuweMap": "NieuweMap",
-#             }
-#
-#  Stap 2:  Voeg de bestanden toe aan FILES:
-#
-#             FILES = {
-#                 ...
-#                 "NieuweMap": [
-#                     "D01Nieuw.xlsx",
-#                 ],
-#             }
-#
-#  LET OP: Als je wilt dat teamgenoten dezelfde bestanden
-#  gebruiken, werk dan config_EXAMPLE.py bij en push die
-#  naar git. Iedereen kopieert het opnieuw naar config.py.
+#  Stap 3:  Klaar!
 #
 # ============================================================
 
-# ----- JOUW DATA PAD -----
-# Plak het volledige pad naar de map met alle data mappen.
-# Gebruik een raw string r"..." zodat backslashes werken.
+# Vervang hieronder met JOUW pad:
 #
-# Voorbeelden:
-#   r"C:\Users\Mila den Hollander\OneDrive - Delft University of Technology\Bureaublad\KT3405 Intensive care en computer simulatie\KT3401_AFdata_2025"
-#   r"C:\Users\HP\OneDrive - Delft University of Technology\KT3405\Artefactdetectie"
-#   r"/Users/jouwnaam/Documents/KT3401_AFdata_2025"
+#   Mila:   r"C:\Users\Mila den Hollander\OneDrive - Delft University of Technology\Bureaublad\KT3405 Intensive care en computer simulatie\KT3401_AFdata_2025"
+#   HP:     r"C:\Users\HP\OneDrive - Delft University of Technology\KT3405\Artefactdetectie"
+#   Wouter: r"C:\Users\wpggr\..."
 
-DATA_PATH = r"PASTE_YOUR_PATH_HERE"
+DATA_PATH = r"C:\Users\JOUWNAAM\pad\naar\KT3401_AFdata_2025"
 
-# ----- SAMPLEFREQUENTIE -----
 FS = 100
 
-# ----- DATA MAPPEN -----
-# De namen van de submappen in jouw DATA_PATH.
-# Pas alleen aan als jouw mapnamen anders zijn.
-
+# Mapnamen in je DATA_PATH
 FOLDERS = {
     "Calibratie":      "Calibratie",
     "Flush":           "Flush",
@@ -89,10 +32,7 @@ FOLDERS = {
     "Infuus_op_CVD":   "Infuus_op_CVD",
 }
 
-# ----- DATA BESTANDEN PER MAP -----
-# Lijst van .xlsx bestanden per artefacttype.
-# Voeg toe of verwijder bestandsnamen naar wens.
-
+# Bestanden per map — voeg nieuwe bestanden toe aan de juiste lijst
 FILES = {
     "Calibratie": [
         "D01Cal.xlsx",
