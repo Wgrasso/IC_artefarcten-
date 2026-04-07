@@ -1,0 +1,314 @@
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.signal import spectrogram
+
+# fallback initialisatie, voorkomt NameError als modules bij import naar t verwijzen
+t = np.array([])
+
+from artefacten.gasbel import functie_gasbel
+from artefacten.slinger import functie_slinger
+from artefacten.flush import functie_flush
+from artefacten.calibratie import functie_calibratie
+from artefacten.transducer import functie_transducer
+from artefacten.infuus import functie_CVD
+from artefacten.gemengd import functie_prioriteitscalibratie, functie_prioriteitcalibratie_slinger, functie_prioriteitflush, functie_prioriteitslinger, functie_prioriteitflushCVD, functie_prioriteitCVD_slinger
+
+
+def read_Artefacts(path, folder, filename, fs):
+    filepath = os.path.join(path, folder, filename)
+    
+
+    raw = raw.iloc[2:, :]
+    data = raw.to_numpy()
+
+    ABP = pd.to_numeric(data[:, 1], errors="coerce").to_numpy()
+    CVP = pd.to_numeric(data[:, 2], errors="coerce").to_numpy()
+
+    t = np.arange(1 / fs, len(ABP) / fs + 1 / fs, 1 / fs)
+
+    return t, ABP, CVP
+
+
+def leeg_df():
+    return pd.DataFrame(columns=["Starttijd", "Eindtijd", "Naam van het artefact", "Signaal"])
+
+
+def niet_leeg(df):
+    return df is not None and not df.empty
+
+
+def spectrogram_feature(signaal, fs=100, resolution=1.0, frange=(5, 20)):
+    if len(signaal) == 0:
+        return np.array([]), np.array([])
+
+    frequenties, tijden, Sxx = spectrogram(
+        signaal,
+        fs=fs,
+        nperseg=int(resolution * fs),
+        noverlap=0,
+        nfft=int(resolution * fs),
+        scaling="spectrum",
+        mode="magnitude",
+    )
+
+    selected = (frequenties >= frange[0]) & (frequenties <= frange[1])
+
+    if np.sum(selected) == 0:
+        return np.zeros(len(signaal)), np.array([])
+
+    out = np.mean(np.abs(Sxx[selected, :]), axis=0)
+    afwijkingen = np.interp(
+        np.linspace(0, 1, len(signaal)),
+        np.linspace(0, 1, len(out)),
+        out,
+    )
+    return afwijkingen, out
+
+def beslisboom(path, folder, filename, fs=100):
+    t = np.array([])
+    ABP = np.array([])
+    CVP = np.array([])
+
+    try:
+        t, ABP, CVP = read_Artefacts(path, folder, filename, fs)
+    except Exception as e:
+        print(f"Fout tijdens inlezen data: {e}")
+        t, ABP, CVP = np.array([]), np.array([]), np.array([])
+
+    
+    if (
+        t is None
+        or ABP is None
+        or CVP is None
+        or len(t) == 0
+        or len(ABP) == 0
+        or len(CVP) == 0
+    ):
+        print("Onjuiste of lege data inlezen.")
+        return leeg_df()
+
+    if len(t) != len(ABP) or len(t) != len(CVP):
+        print("Lengte van t, ABP en CVP komt niet overeen.")
+        return leeg_df()
+
+    artefacten_uit_gasbel = leeg_df()
+    artefacten_uit_slinger = leeg_df()
+    artefacten_uit_calibratie = leeg_df()
+    artefacten_uit_flush = leeg_df()
+    artefacten_uit_transducer = leeg_df()
+    artefacten_uit_CVD = leeg_df()
+
+    # =========================================================
+    # Eerste deel beslisboom: slinger of gasbel
+    # =========================================================
+    resolution = 1.0
+    frange = (5, 20)
+
+    # ABP
+    afwijkingen_abp, out_abp = spectrogram_feature(ABP, fs=fs, resolution=resolution, frange=frange)
+
+    out_slinger_detecteert = np.zeros(len(t), dtype=int)
+    out_gasbel_detecteert = np.zeros(len(t), dtype=int)
+
+    if len(out_abp) > 0:
+        mean_out_abp = np.mean(out_abp)
+
+        out_slinger_detecteert[afwijkingen_abp > (mean_out_abp * 1.2)] = 1
+        out_gasbel_detecteert[afwijkingen_abp < (mean_out_abp * 0.55)] = -1
+
+    if np.sum(out_slinger_detecteert) > abs(np.sum(out_gasbel_detecteert)):
+        artefacten_uit_slinger, *_ = functie_slinger(t, ABP, CVP, fs=fs)
+    else:
+        artefacten_uit_gasbel, *_ = functie_gasbel(t, ABP, CVP, fs=fs)
+        artefacten_uit_slinger = leeg_df()
+        artefacten_uit_flush, *_ = functie_flush(t, ABP, CVP, fs=fs)
+
+    # ABP tellingen
+    aantal_ABP_gasbel = 0
+    aantal_ABP_slinger = 0
+    if len(out_abp) > 0:
+        gem = np.mean(out_abp)
+        afwijking_indices_gasbel = afwijkingen_abp < (gem * 0.55)
+        aantal_ABP_gasbel = np.sum(afwijking_indices_gasbel)
+
+        afwijking_indices_slinger = afwijkingen_abp > (np.mean(out_abp) + 15)
+        aantal_ABP_slinger = np.sum(afwijking_indices_slinger)
+
+    # CVP
+    afwijkingen_cvp, out_cvp = spectrogram_feature(CVP, fs=fs, resolution=resolution, frange=frange)
+
+    out_CVP_slinger_detecteert = np.zeros(len(t), dtype=int)
+    out_CVP_gasbel_detecteert = np.zeros(len(t), dtype=int)
+
+    if len(out_cvp) > 0:
+        mean_out_cvp = np.mean(out_cvp)
+
+        out_CVP_slinger_detecteert[afwijkingen_cvp > mean_out_cvp] = 1
+        out_CVP_gasbel_detecteert[afwijkingen_cvp < (mean_out_cvp * 0.7)] = -1
+
+    if np.sum(out_CVP_slinger_detecteert) > abs(np.sum(out_CVP_gasbel_detecteert)) and not niet_leeg(artefacten_uit_slinger):
+        artefacten_uit_slinger, *_ = functie_slinger(t, ABP, CVP, fs=fs)
+    elif not niet_leeg(artefacten_uit_gasbel):
+        artefacten_uit_gasbel, *_ = functie_gasbel(t, ABP, CVP, fs=fs)
+        artefacten_uit_flush, *_ = functie_flush(t, ABP, CVP, fs=fs)
+
+    # CVP tellingen
+    aantal_CVP_gasbel = 0
+    aantal_CVP_slinger = 0
+    if len(out_cvp) > 0:
+        gem_CVP = np.mean(out_cvp)
+        afwijking_indices_CVP_gasbel = afwijkingen_cvp < (gem_CVP * 0.35)
+        aantal_CVP_gasbel = np.sum(afwijking_indices_CVP_gasbel)
+
+        afwijking_indices_CVP_slinger = afwijkingen_cvp > gem_CVP
+        aantal_CVP_slinger = np.sum(afwijking_indices_CVP_slinger)
+
+    # =========================================================
+    # Tweede deel beslisboom: calibratie / transducer / CVD / flush
+    # =========================================================
+    gem_ABP = pd.Series(ABP).rolling(window=401, center=True, min_periods=1).mean().to_numpy()
+    verandering_ABP = np.diff(gem_ABP)
+
+    verlaging_ABP = np.where(verandering_ABP < -0.05)[0]
+    verhoging_ABP = np.where(verandering_ABP > 0.08)[0]
+
+    tijd_start_verhoging_ABP = None
+    tijd_start_verlaging_ABP = None
+
+    if len(verhoging_ABP) > 0:
+        tijd_start_verhoging_ABP = t[int(round(np.median(verhoging_ABP)))]
+
+    if len(verlaging_ABP) > 0:
+        tijd_start_verlaging_ABP = t[int(round(np.median(verlaging_ABP)))]
+
+    gem_CVP = pd.Series(CVP).rolling(window=401, center=True, min_periods=1).mean().to_numpy()
+    verandering_CVP = np.diff(gem_CVP)
+
+    verlaging_CVP = np.where(verandering_CVP < -0.038)[0]
+    verhoging_CVP = np.where(verandering_CVP > 0.038)[0]
+
+    tijd_start_verhoging_CVP = None
+    tijd_start_verlaging_CVP = None
+
+    if len(verhoging_CVP) > 0:
+        tijd_start_verhoging_CVP = t[int(round(np.median(verhoging_CVP)))]
+
+    if len(verlaging_CVP) > 0:
+        tijd_start_verlaging_CVP = t[int(round(np.median(verlaging_CVP)))]
+
+    lower_threshold = -0.01
+    upper_threshold = 0.01
+    consecutive_indices = np.where((verandering_ABP >= lower_threshold) & (verandering_ABP <= upper_threshold))[0]
+    consecutive_lengths = np.diff(consecutive_indices) if len(consecutive_indices) > 1 else np.array([])
+
+    if len(verlaging_ABP) > 0 or len(verlaging_CVP) > 0:
+        if len(verlaging_ABP) > 0 and tijd_start_verhoging_ABP is not None and tijd_start_verlaging_ABP is not None:
+            if tijd_start_verhoging_ABP < tijd_start_verlaging_ABP:
+                artefacten_uit_flush, *_ = functie_flush(t, ABP, CVP, fs=fs)
+                artefacten_uit_calibratie, *_ = functie_calibratie(t, ABP, CVP, fs=fs)
+
+                if niet_leeg(artefacten_uit_calibratie):
+                    artefacten_uit_gasbel = functie_prioriteitscalibratie(t, ABP, CVP)
+                    artefacten_uit_slinger = functie_prioriteitcalibratie_slinger(t, ABP, CVP)
+
+                if niet_leeg(artefacten_uit_flush) and niet_leeg(artefacten_uit_slinger):
+                    artefacten_uit_slinger = functie_prioriteitflush(t, ABP, CVP)
+                    if not niet_leeg(artefacten_uit_calibratie):
+                        artefacten_uit_flush = functie_prioriteitslinger(t, ABP, CVP)
+
+                    if niet_leeg(artefacten_uit_gasbel):
+                        artefacten_uit_flush, *_ = functie_flush(t, ABP, CVP, fs=fs)
+                        if niet_leeg(artefacten_uit_flush) and niet_leeg(artefacten_uit_slinger):
+                            artefacten_uit_slinger = functie_prioriteitflush(t, ABP, CVP)
+
+            if tijd_start_verlaging_ABP < tijd_start_verhoging_ABP:
+                if np.any(consecutive_lengths > 300):
+                    artefacten_uit_calibratie, *_ = functie_calibratie(t, ABP, CVP, fs=fs)
+                    if niet_leeg(artefacten_uit_calibratie) and niet_leeg(artefacten_uit_gasbel):
+                        artefacten_uit_gasbel = functie_prioriteitscalibratie(t, ABP, CVP)
+                        artefacten_uit_slinger = functie_prioriteitcalibratie_slinger(t, ABP, CVP)
+                else:
+                    if len(verlaging_ABP) > 0 and len(verlaging_CVP) > 0:
+                        artefacten_uit_transducer, *_ = functie_transducer(t, ABP, CVP, fs=fs)
+
+        if len(verlaging_CVP) > 0 and tijd_start_verhoging_CVP is not None and tijd_start_verlaging_CVP is not None:
+            if tijd_start_verhoging_CVP < tijd_start_verlaging_CVP:
+                artefacten_uit_CVD, *_ = functie_CVD(t, ABP, CVP, fs=fs)
+
+                if niet_leeg(artefacten_uit_CVD) and niet_leeg(artefacten_uit_flush):
+                    artefacten_uit_CVD = functie_prioriteitflushCVD(t, ABP, CVP)
+
+                if niet_leeg(artefacten_uit_CVD) and niet_leeg(artefacten_uit_slinger):
+                    artefacten_uit_slinger = functie_prioriteitCVD_slinger(t, ABP, CVP)
+
+                if not niet_leeg(artefacten_uit_CVD) and not niet_leeg(artefacten_uit_flush):
+                    artefacten_uit_flush, *_ = functie_flush(t, ABP, CVP, fs=fs)
+                    artefacten_uit_calibratie, *_ = functie_calibratie(t, ABP, CVP, fs=fs)
+
+                    if niet_leeg(artefacten_uit_calibratie):
+                        artefacten_uit_gasbel = functie_prioriteitscalibratie(t, ABP, CVP)
+                        artefacten_uit_slinger = functie_prioriteitcalibratie_slinger(t, ABP, CVP)
+
+                if niet_leeg(artefacten_uit_flush) and niet_leeg(artefacten_uit_slinger):
+                    artefacten_uit_slinger = functie_prioriteitflush(t, ABP, CVP)
+                    if not niet_leeg(artefacten_uit_calibratie):
+                        artefacten_uit_flush = functie_prioriteitslinger(t, ABP, CVP)
+
+                    if niet_leeg(artefacten_uit_gasbel):
+                        artefacten_uit_flush, *_ = functie_flush(t, ABP, CVP, fs=fs)
+                        if niet_leeg(artefacten_uit_flush) and niet_leeg(artefacten_uit_slinger):
+                            artefacten_uit_slinger = functie_prioriteitflush(t, ABP, CVP)
+
+            if tijd_start_verlaging_CVP < tijd_start_verhoging_CVP:
+                if np.any(consecutive_lengths > 300):
+                    artefacten_uit_calibratie, *_ = functie_calibratie(t, ABP, CVP, fs=fs)
+                    if niet_leeg(artefacten_uit_calibratie):
+                        artefacten_uit_gasbel = functie_prioriteitscalibratie(t, ABP, CVP)
+                        artefacten_uit_slinger = functie_prioriteitcalibratie_slinger(t, ABP, CVP)
+                else:
+                    if len(verlaging_ABP) > 0 and len(verlaging_CVP) > 0:
+                        artefacten_uit_transducer, *_ = functie_transducer(t, ABP, CVP, fs=fs)
+
+    # =========================================================
+    # Alles samenvoegen
+    # =========================================================
+    artefacten = pd.concat(
+        [
+            artefacten_uit_flush,
+            artefacten_uit_slinger,
+            artefacten_uit_calibratie,
+            artefacten_uit_transducer,
+            artefacten_uit_CVD,
+            artefacten_uit_gasbel,
+        ],
+        ignore_index=True,
+    )
+
+    print("Gedetecteerde artefacten:")
+    print(artefacten)
+
+    # =========================================================
+    # Plot
+    # =========================================================
+    plt.figure(figsize=(12, 6))
+    plt.plot(t, ABP, "b", label="ABP")
+    plt.plot(t, CVP, "r", label="CVP")
+    plt.xlabel("Tijd [s]")
+    plt.ylabel("mmHg")
+
+    for i, row in artefacten.iterrows():
+        start_time = row["Starttijd"]
+        end_time = row["Eindtijd"]
+        event_label = f'{row["Naam van het artefact"]} {row["Signaal"]}'
+        ypositie = np.min(ABP) - 5 - (i * 6)
+        plt.plot([start_time, end_time], [ypositie, ypositie], linewidth=2, label=event_label)
+
+    filename_spatie = filename.replace("_", " ").replace(".xlsx", "")
+    plt.title(f"Artefacten in {filename_spatie}")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    return artefacten
