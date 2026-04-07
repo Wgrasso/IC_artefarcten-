@@ -62,6 +62,32 @@ def _voeg_dichte_segmenten_samen(start_tijden, eind_tijden, min_gap):
     return np.array(nieuwe_starts), np.array(nieuwe_einden)
 
 
+def _projecteer_bins_naar_samples(values_bins, tijden_bins, t):
+    """
+    Projecteer spectrogram-binwaarden stapvormig naar de sample-tijdas.
+    Geen lineaire interpolatie om kunstmatige "bruggen" te vermijden.
+    """
+    values_bins = np.asarray(values_bins)
+    tijden_bins = np.asarray(tijden_bins, dtype=float)
+    t = np.asarray(t, dtype=float)
+
+    if len(values_bins) == 0 or len(tijden_bins) == 0:
+        return np.zeros(len(t), dtype=float)
+    if len(values_bins) != len(tijden_bins):
+        raise ValueError("values_bins en tijden_bins moeten even lang zijn.")
+
+    # Grenzen tussen bins = midden tussen opeenvolgende spectrogramtijden.
+    grenzen = np.empty(len(tijden_bins) + 1, dtype=float)
+    grenzen[0] = -np.inf
+    grenzen[-1] = np.inf
+    if len(tijden_bins) > 1:
+        grenzen[1:-1] = (tijden_bins[:-1] + tijden_bins[1:]) / 2.0
+
+    idx = np.searchsorted(grenzen, t, side="right") - 1
+    idx = np.clip(idx, 0, len(values_bins) - 1)
+    return values_bins[idx]
+
+
 def _slinger_detectie_1_signaal(signaal, t, fs, frange, resolution,
                                 drempel_factor, min_samples,
                                 max_fraction, merge_gap):
@@ -89,34 +115,35 @@ def _slinger_detectie_1_signaal(signaal, t, fs, frange, resolution,
         return leeg_mask, np.array([]), np.array([]), np.zeros(len(t))
 
     out = np.mean(np.abs(Sxx[geselecteerd, :]), axis=0)
-
-    # Interpoleer terug naar lengte van t
-    afwijkingen = np.interp(
-        np.linspace(0, 1, len(t)),
-        np.linspace(0, 1, len(out)),
-        out
-    )
+    afwijkingen = _projecteer_bins_naar_samples(out, tijden, t)
 
     # Threshold
     drempelwaarde = np.mean(out) * drempel_factor
-    mask = afwijkingen > drempelwaarde
+    mask_bins = out > drempelwaarde
 
-    # Minimale duur afdwingen
-    mask = _maak_minimale_duur_mask(mask, min_samples)
+    # Minimale duur afdwingen op spectrogram-niveau.
+    # min_samples slaat op samples van het originele signaal.
+    if len(tijden) > 1:
+        dt_spec = float(np.median(np.diff(tijden)))
+    else:
+        dt_spec = float(resolution)
+    min_duur_s = float(min_samples) / float(fs)
+    min_bins = max(1, int(np.ceil(min_duur_s / dt_spec)))
+    mask_bins = _maak_minimale_duur_mask(mask_bins, min_bins)
 
     # Verwerp als "bijna alles" positief is
-    if np.sum(mask) > max_fraction * len(t):
-        mask = np.zeros(len(t), dtype=bool)
+    if np.sum(mask_bins) > max_fraction * len(mask_bins):
+        mask_bins = np.zeros(len(mask_bins), dtype=bool)
 
-    # Segmenten bepalen
-    start_tijden, eind_tijden = _vind_segmenten(mask, t)
+    # Segmenten bepalen op spectrogramtijd-as.
+    start_tijden, eind_tijden = _vind_segmenten(mask_bins, tijden)
 
     # Segmenten samenvoegen als ze dicht bij elkaar liggen
     start_tijden, eind_tijden = _voeg_dichte_segmenten_samen(
         start_tijden, eind_tijden, min_gap=merge_gap
     )
 
-    # Maak mask opnieuw op basis van samengevoegde segmenten
+    # Maak sample-mask opnieuw op basis van samengevoegde segmenten.
     nieuwe_mask = np.zeros(len(t), dtype=bool)
     for s, e in zip(start_tijden, eind_tijden):
         nieuwe_mask[(t >= s) & (t <= e)] = True
@@ -147,10 +174,10 @@ def functie_slinger(t, ABP, CVP, fs=100):
         fs=fs,
         frange=frange,
         resolution=resolution,
-        drempel_factor=1.0,
+        drempel_factor=1.15,
         min_samples=200,
         max_fraction=0.6,
-        merge_gap=5.0
+        merge_gap=1.0
     )
 
     for s, e in zip(start_ABP, eind_ABP):
@@ -163,10 +190,10 @@ def functie_slinger(t, ABP, CVP, fs=100):
         fs=fs,
         frange=frange,
         resolution=resolution,
-        drempel_factor=1.3,
+        drempel_factor=1.45,
         min_samples=200,
         max_fraction=0.7,
-        merge_gap=2.0
+        merge_gap=0.8
     )
 
     for s, e in zip(start_CVP, eind_CVP):
