@@ -11,9 +11,10 @@ def functie_transducer(t, ABP, CVP):
    
     # --- ABP Detectie ---
     # MATLAB: movmean(ABP, [5 5]) -> Python: pandas rolling mean
+    abp_smooth = pd.Series(ABP).rolling(window=11, center=True).mean().bfill().ffill().values
     cvp_smooth = pd.Series(CVP).rolling(window=11, center=True).mean().bfill().ffill().values
     threshold_ABP = np.mean(ABP) - 21
-   
+
     # Zoek pieken in het omgekeerde signaal (MATLAB: findpeaks(-signaal, 'MinPeakHeight', -threshold))
     peaks_ABP, _ = find_peaks(-abp_smooth, height=-threshold_ABP)
    

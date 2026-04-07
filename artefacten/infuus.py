@@ -33,47 +33,42 @@ def functie_CVD(t, ABP, CVP):
     return pd.DataFrame(artefacten_uit_CVD, columns=['Starttijd', 'Eindtijd', 'Naam', 'Signaal'])
 
 
-# --- Instellingen voor de test ---
-from config import DATA_PATH, FS
-path = DATA_PATH
-folder = 'Infuus_op_CVD'
-filename = 'D04Inf-op-CVP.xlsx'
-fs = FS
+if __name__ == "__main__":
+    from config import DATA_PATH, FS
+    path = DATA_PATH
+    folder = 'Infuus_op_CVD'
+    filename = 'D04Inf-op-CVP.xlsx'
+    fs = FS
 
+    # 1. Data inladen
+    t, ABP, CVP = read_Artefacts(path, folder, filename, fs)
 
-# 1. Data inladen
-t, ABP, CVP = read_Artefacts(path, folder, filename, fs)
+    # 2. Detectie uitvoeren
+    df_results = functie_CVD(t, ABP, CVP)
 
+    # 3. Resultaten printen
+    print("\nGedetecteerde Artefacten (Infuus op CVD):")
+    print(df_results)
 
-# 2. Detectie uitvoeren
-df_results = functie_CVD(t, ABP, CVP)
+    # 4. Plotten
+    def plot_infuus(t, ABP, CVP, df_results):
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.plot(t, CVP, label='CVP (CVD)', color='black', linewidth=0.7)
+        ax.set_ylabel('Druk (mmHg)')
+        ax.set_xlabel('Tijd (s)')
+        ax.set_title(f'Detectie Infuus op CVD: {filename}')
 
+        for _, row in df_results.iterrows():
+            start, eind = float(row['Starttijd']), float(row['Eindtijd'])
+            ax.fill_between([start, eind], ax.get_ylim()[0], ax.get_ylim()[1],
+                             color='red', alpha=0.3, label='Infuus gedetecteerd')
+            ax.scatter([start, eind], [ax.get_ylim()[1]]*2, color='red', marker='*', s=100)
 
-# 3. Resultaten printen
-print("\nGedetecteerde Artefacten (Infuus op CVD):")
-print(df_results)
+        plt.legend()
+        plt.show()
 
-
-# 4. Plotten (Hergebruik de logica van je vorige script)
-def plot_infuus(t, ABP, CVP, df_results):
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(t, CVP, label='CVP (CVD)', color='black', linewidth=0.7)
-    ax.set_ylabel('Druk (mmHg)')
-    ax.set_xlabel('Tijd (s)')
-    ax.set_title(f'Detectie Infuus op CVD: {filename}')
-   
-    for _, row in df_results.iterrows():
-        start, eind = float(row['Starttijd']), float(row['Eindtijd'])
-        ax.fill_between([start, eind], ax.get_ylim()[0], ax.get_ylim()[1],
-                         color='red', alpha=0.3, label='Infuus gedetecteerd')
-        ax.scatter([start, eind], [ax.get_ylim()[1]]*2, color='red', marker='*', s=100)
-   
-    plt.legend()
-    plt.show()
-
-
-if not df_results.empty:
-    plot_infuus(t, ABP, CVP, df_results)
+    if not df_results.empty:
+        plot_infuus(t, ABP, CVP, df_results)
 
 
 
