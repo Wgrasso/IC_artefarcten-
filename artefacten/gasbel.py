@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from scipy.signal import spectrogram
+from scipy.signal import find_peaks
 
 
 def _maak_minimale_duur_mask(mask, min_samples):
@@ -59,88 +59,108 @@ def _voeg_segmenten_samen(start_tijden, eind_tijden, min_gap):
     return np.array(starts), np.array(einden)
 
 
-def _spectrogram_afwijking(signaal, fs, resolution, frange):
+def _rolling_amplitude(signaal, window_samples):
     """
-    Bereken spectrogrammaat in gekozen frequentiegebied en interpoleer naar lengte van signaal.
+    Lokale amplitude schatting: rolling (max - min).
     """
-    frequenties, tijden, Sxx = spectrogram(
+    s = pd.Series(np.asarray(signaal, dtype=float))
+    roll_max = s.rolling(window=window_samples, center=True).max()
+    roll_min = s.rolling(window=window_samples, center=True).min()
+    amp = (roll_max - roll_min).bfill().ffill().to_numpy()
+    return amp
+
+
+def _rolling_peak_sharpness(signaal, fs, window_samples):
+    """
+    Lokale piekscherpte via gemiddelde prominences van systolische pieken.
+    """
+    signaal = np.asarray(signaal, dtype=float)
+    peaks, props = find_peaks(
         signaal,
-        fs=fs,
-        nperseg=int(resolution * fs),
-        noverlap=0,
-        nfft=int(resolution * fs),
-        scaling="spectrum",
-        mode="magnitude"
+        prominence=max(1e-6, float(np.std(signaal) * 0.1)),
+        distance=max(1, int(0.3 * fs)),
     )
-
-    geselecteerd = (frequenties >= frange[0]) & (frequenties <= frange[1])
-
-    if np.sum(geselecteerd) == 0:
-        return np.zeros(len(signaal)), np.array([])
-
-    out = np.mean(np.abs(Sxx[geselecteerd, :]), axis=0)
-
-    afwijkingen = np.interp(
-        np.linspace(0, 1, len(signaal)),
-        np.linspace(0, 1, len(out)),
-        out
+    sharp = np.zeros(len(signaal), dtype=float)
+    if len(peaks) == 0:
+        return sharp
+    prom = np.asarray(props.get("prominences", np.zeros(len(peaks))), dtype=float)
+    point_series = pd.Series(0.0, index=np.arange(len(signaal)))
+    point_series.iloc[peaks] = prom
+    sharp = (
+        point_series
+        .rolling(window=window_samples, center=True)
+        .mean()
+        .bfill()
+        .ffill()
+        .to_numpy()
     )
+    return sharp
 
-    return afwijkingen, out
 
-
-def _detect_flush_mask(signaal, t, threshold_offset, min_samples):
+def _detect_flush_mask(signaal, fs, threshold_offset, slope_threshold, min_samples):
     """
-    Eenvoudige flush-detectie om flushgebieden uit de gasbelmask te halen.
+    Simpele flushschatting op hoge absolute waarde of snelle stijgsnelheid.
     """
-    threshold = np.mean(signaal) + threshold_offset
-    piek_mask = signaal > threshold
-    flush_mask = _maak_minimale_duur_mask(piek_mask, min_samples=min_samples)
+    signaal = np.asarray(signaal, dtype=float)
+    amplitude_mask = signaal > (float(np.mean(signaal)) + float(threshold_offset))
+    slope_mask = np.concatenate(([False], np.abs(np.diff(signaal)) > float(slope_threshold)))
+    flush_mask = _maak_minimale_duur_mask(amplitude_mask | slope_mask, min_samples=min_samples)
     return flush_mask
 
 
-def _detect_gasbel_1_signaal(signaal, t, fs, resolution, frange,
-                             threshold_factor, flush_offset,
-                             flush_min_samples, gasbel_min_samples,
-                             max_fraction, merge_gap):
+def _require_flush_before(mask, flush_mask):
+    """
+    Houd detectie alleen waar er eerder flush in het signaal is gezien.
+    """
+    if len(mask) != len(flush_mask):
+        return mask
+    flush_seen = np.cumsum(flush_mask.astype(int)) > 0
+    return mask & flush_seen
+
+
+def _detect_gasbel_1_signaal(signaal, t, fs, amp_window_s,
+                             baseline_s, drop_fraction, sharp_drop_fraction,
+                             gasbel_min_samples, merge_gap,
+                             flush_threshold_offset, flush_slope_threshold, flush_min_samples):
     """
     Detecteer gasbel in één signaal.
     """
     signaal = np.asarray(signaal, dtype=float)
 
-    afwijkingen, out = _spectrogram_afwijking(signaal, fs, resolution, frange)
+    amplitude = _rolling_amplitude(signaal, window_samples=max(3, int(amp_window_s * fs)))
+    afwijkingen = amplitude.copy()
 
-    if len(out) == 0:
+    if len(amplitude) == 0:
         leeg = np.zeros(len(t), dtype=bool)
         return leeg, np.array([]), np.array([]), afwijkingen
 
-    gem = np.mean(out)
-    drempel = gem * threshold_factor
+    window_samples = max(3, int(amp_window_s * fs))
+    sharpness = _rolling_peak_sharpness(signaal, fs=fs, window_samples=window_samples)
 
-    # Gasbel = lagere spectrogramenergie
-    afwijking_mask = afwijkingen < drempel
+    baseline_samples = max(1, int(baseline_s * fs))
+    baseline_amp = float(np.mean(amplitude[:baseline_samples]))
+    baseline_sharp = float(np.mean(sharpness[:baseline_samples]))
+    amp_drempel = baseline_amp * (1.0 - float(drop_fraction))
+    sharp_drempel = baseline_sharp * (1.0 - float(sharp_drop_fraction))
 
-    # Flush apart schatten en verwijderen
+    # Gasbel: amplitude omlaag + piekscherpte omlaag.
+    gasbel_mask = (amplitude < amp_drempel) & (sharpness < sharp_drempel)
+
+    # Vereis dat er eerder een flush is geweest.
     flush_mask = _detect_flush_mask(
         signaal=signaal,
-        t=t,
-        threshold_offset=flush_offset,
-        min_samples=flush_min_samples
+        fs=fs,
+        threshold_offset=flush_threshold_offset,
+        slope_threshold=flush_slope_threshold,
+        min_samples=flush_min_samples,
     )
-
-    gasbel_mask = afwijking_mask & (~flush_mask)
-
-    # Minimale duur afdwingen
+    gasbel_mask = _require_flush_before(gasbel_mask, flush_mask)
     gasbel_mask = _maak_minimale_duur_mask(gasbel_mask, gasbel_min_samples)
 
     # Eerste en laatste sample uitzetten
     if len(gasbel_mask) > 1:
         gasbel_mask[0] = False
         gasbel_mask[-1] = False
-
-    # Weggooien als bijna heel signaal positief is
-    if np.sum(gasbel_mask) > max_fraction * len(t):
-        gasbel_mask = np.zeros(len(t), dtype=bool)
 
     start_tijden, eind_tijden = _vind_segmenten(gasbel_mask, t)
     start_tijden, eind_tijden = _voeg_segmenten_samen(start_tijden, eind_tijden, merge_gap)
@@ -157,23 +177,21 @@ def functie_gasbel(t, ABP, CVP, fs=100):
     """
     Detecteer gasbelartefacten alleen in ABP.
     """
-    resolution = 0.5
-    frange = (5, 20)
-
     artefact_rows = []
 
     binair_ABP, start_ABP, eind_ABP, afwijkingen_ABP = _detect_gasbel_1_signaal(
         signaal=ABP,
         t=t,
         fs=fs,
-        resolution=resolution,
-        frange=frange,
-        threshold_factor=0.65,
-        flush_offset=75,
-        flush_min_samples=20,
+        amp_window_s=1.0,
+        baseline_s=8.0,
+        drop_fraction=0.35,
+        sharp_drop_fraction=0.30,
         gasbel_min_samples=300,
-        max_fraction=0.7,
-        merge_gap=2.0
+        merge_gap=0.5,
+        flush_threshold_offset=75.0,
+        flush_slope_threshold=20.0,
+        flush_min_samples=20,
     )
 
     for s, e in zip(start_ABP, eind_ABP):

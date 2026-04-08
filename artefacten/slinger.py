@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy.signal import spectrogram
+from scipy.signal import find_peaks
 
 
 def _maak_minimale_duur_mask(mask, min_samples):
@@ -88,9 +89,43 @@ def _projecteer_bins_naar_samples(values_bins, tijden_bins, t):
     return values_bins[idx]
 
 
+def _gemiddelde_piekamplitude_per_bin(signaal, fs, resolution):
+    """
+    Bepaal per spectrogram-bin de gemiddelde piekamplitude (prominence).
+    """
+    x = np.asarray(signaal, dtype=float)
+    bin_len = max(3, int(resolution * fs))
+    n_bins = int(np.ceil(len(x) / bin_len))
+    out = np.zeros(n_bins, dtype=float)
+
+    for i in range(n_bins):
+        start = i * bin_len
+        end = min(len(x), (i + 1) * bin_len)
+        seg = x[start:end]
+        if len(seg) < 3:
+            out[i] = 0.0
+            continue
+        peaks, props = find_peaks(seg, prominence=0)
+        if len(peaks) == 0:
+            out[i] = 0.0
+            continue
+        prom = np.asarray(props.get("prominences", []), dtype=float)
+        out[i] = float(np.mean(prom)) if len(prom) else 0.0
+    return out
+
+
+def _robuuste_hoge_drempel(values, k):
+    values = np.asarray(values, dtype=float)
+    med = float(np.median(values))
+    mad = float(np.median(np.abs(values - med)))
+    scale = mad if mad > 1e-12 else float(np.std(values) + 1e-12)
+    return med + float(k) * scale
+
+
 def _slinger_detectie_1_signaal(signaal, t, fs, frange, resolution,
-                                drempel_factor, min_samples,
-                                max_fraction, merge_gap):
+                                drempel_k, min_samples,
+                                max_fraction, merge_gap,
+                                peak_ratio_min, min_peak_amplitude):
     """
     Detecteer slinger in één signaal met spectrogram.
     """
@@ -114,12 +149,28 @@ def _slinger_detectie_1_signaal(signaal, t, fs, frange, resolution,
         leeg_mask = np.zeros(len(t), dtype=bool)
         return leeg_mask, np.array([]), np.array([]), np.zeros(len(t))
 
-    out = np.mean(np.abs(Sxx[geselecteerd, :]), axis=0)
+    geselecteerde_power = np.abs(Sxx[geselecteerd, :])
+    out = np.mean(geselecteerde_power, axis=0)
     afwijkingen = _projecteer_bins_naar_samples(out, tijden, t)
+    mean_peak_amp_bins = _gemiddelde_piekamplitude_per_bin(signaal, fs, resolution)
+    if len(mean_peak_amp_bins) != len(out):
+        # Veilig alignen als afronding net anders uitvalt.
+        mean_peak_amp_bins = np.interp(
+            np.linspace(0, 1, len(out)),
+            np.linspace(0, 1, len(mean_peak_amp_bins)),
+            mean_peak_amp_bins,
+        )
 
-    # Threshold
-    drempelwaarde = np.mean(out) * drempel_factor
-    mask_bins = out > drempelwaarde
+    # Robuuste threshold + spectrale piekdominantie
+    drempelwaarde = _robuuste_hoge_drempel(out, drempel_k)
+    mean_power = np.mean(geselecteerde_power, axis=0) + 1e-12
+    peak_power = np.max(geselecteerde_power, axis=0)
+    peak_ratio = peak_power / mean_power
+    mask_bins = (
+        (out > drempelwaarde)
+        & (peak_ratio >= peak_ratio_min)
+        & (mean_peak_amp_bins > float(min_peak_amplitude))
+    )
 
     # Minimale duur afdwingen op spectrogram-niveau.
     # min_samples slaat op samples van het originele signaal.
@@ -174,10 +225,12 @@ def functie_slinger(t, ABP, CVP, fs=100):
         fs=fs,
         frange=frange,
         resolution=resolution,
-        drempel_factor=1.15,
-        min_samples=200,
+        drempel_k=3.0,
+        min_samples=350,
         max_fraction=0.6,
-        merge_gap=1.0
+        merge_gap=0.5,
+        peak_ratio_min=1.8,
+        min_peak_amplitude=3.0
     )
 
     for s, e in zip(start_ABP, eind_ABP):
@@ -190,10 +243,12 @@ def functie_slinger(t, ABP, CVP, fs=100):
         fs=fs,
         frange=frange,
         resolution=resolution,
-        drempel_factor=1.45,
-        min_samples=200,
+        drempel_k=3.0,
+        min_samples=350,
         max_fraction=0.7,
-        merge_gap=0.8
+        merge_gap=0.3,
+        peak_ratio_min=1.9,
+        min_peak_amplitude=3.0
     )
 
     for s, e in zip(start_CVP, eind_CVP):
